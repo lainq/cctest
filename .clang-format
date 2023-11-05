@@ -1,0 +1,5 @@
+Language: Cpp
+BasedOnStyle: Google
+Standard: Cpp20
+TabWidth: 2
+UseTab: Never
