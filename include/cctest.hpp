@@ -18,14 +18,17 @@
 #endif
 #endif
 
-#define TEST_CASE(name) static void test_##name()
+#define TEST_CASE(name)                                       \
+  class test_case_##name : public test_case {                 \
+   public:                                                    \
+    static test_case_##name _unused_test_case_var;            \
+    test_case_##name() : test_case(#name) {}                  \
+    void run() const override;                                \
+  };                                                          \
+  test_case_##name test_case_##name::_unused_test_case_var{}; \
+  void test_case_##name::run() const
 
 #define RUN_TESTS() test_collection::run_tests()
-#define REGISTER_TEST(name)                                               \
-  test_collection::append(                                                \
-      #name, std::function<std::remove_pointer_t<decltype(test_##name)>>( \
-                 test_##name))
-
 #define ASSERT(expression) \
   assertions::assert(#expression, __FUNCTION_NAME__, __FILE__, expression)
 
@@ -50,41 +53,38 @@ class assertion_failure : public std::exception {
   }
 };
 
-class unit_test {
- public:
-  using test_function_t = std::function<void()>;
-  unit_test(const std::string&& tname, test_function_t&& func)
-      : name(std::move(tname)), test_func(std::move(func)) {}
-  std::optional<assertion_failure> run() const {
-    try {
-      test_func();
-    } catch (assertion_failure& exception) {
-      return exception;
-    }
-    return {};
-  }
-  const std::string& get_name() const { return name; }
-
- private:
-  const std::string name;
-  unit_test::test_function_t test_func;
-};
-
 constexpr const char* failed_str = "\033[31mFAILED\033[39m";
 constexpr const char* passed_str = "\033[32mPASSED\033[39m";
+
+class test_case {
+ private:
+  std::string test_name;
+
+ public:
+  test_case(const std::string&& test);
+  virtual void run() const {}
+  const std::string& get_name() const { return test_name; }
+};
 
 class test_collection {
  private:
   test_collection() = delete;
-  inline static std::vector<std::unique_ptr<unit_test>> tests{};
+  inline static std::vector<test_case*> tests{};
 
  public:
-  template <typename... Args>
-  static void append(const std::string&& expression,
-                     unit_test::test_function_t&& func) {
-    std::unique_ptr<unit_test> test{
-        new unit_test(std::move(expression), std::move(func))};
-    tests.push_back(std::move(test));
+  static char append(test_case* test_case) {
+    tests.push_back(test_case);
+    return 0;
+  }
+
+  static std::optional<assertion_failure> run_individual_test(
+      const test_case* test) {
+    try {
+      test->run();
+    } catch (const assertion_failure& exception) {
+      return exception;
+    };
+    return {};
   }
 
   static void run_tests() {
@@ -95,7 +95,7 @@ class test_collection {
                << (tests.size() == 1 ? " test" : " tests");
 
     for (const auto& unit_test : tests) {
-      auto result = unit_test->run();
+      auto result = run_individual_test(unit_test);
       out_stream << "\ntest " << unit_test->get_name() << " ... "
                  << (result.has_value() ? failed_str : passed_str);
       if (result.has_value()) {
@@ -120,6 +120,11 @@ class test_collection {
     std::cout << out_stream.rdbuf();
   }
 };
+
+test_case::test_case(const std::string&& test) {
+  test_name = std::move(test);
+  test_collection::append(this);
+}
 
 class assertions {
  public:
