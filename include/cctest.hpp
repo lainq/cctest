@@ -2,12 +2,11 @@
 #define CCTEST_HPP_INCLUDED
 
 #include <exception>
-#include <functional>
 #include <iostream>
-#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #ifndef __FUNCTION_NAME__
@@ -19,10 +18,10 @@
 #endif
 
 #define TEST_CASE(name)                                       \
-  class test_case_##name : public cctest::test_case {                 \
-   public:\
+  class test_case_##name : public cctest::test_case {         \
+   public:                                                    \
     static test_case_##name _unused_test_case_var;            \
-    test_case_##name() : cctest::test_case(#name) {}                  \
+    test_case_##name() : cctest::test_case(#name) {}          \
     void run() const override;                                \
   };                                                          \
   test_case_##name test_case_##name::_unused_test_case_var{}; \
@@ -30,35 +29,67 @@
 
 #define RUN_TESTS() cctest::test_collection::run_tests()
 
-#define ASSERT__(expression, is_fatal)\
-  cctest::assertions::assert(#expression, __FUNCTION_NAME__, __FILE__, expression, is_fatal)
+#define ASSERT__(expression, is_fatal)                                 \
+  cctest::assertions::assert(#expression, __FUNCTION_NAME__, __FILE__, \
+                             __LINE__, expression, is_fatal)
 #define ASSERT(expression) ASSERT__(expression, false)
 
-#define ASSERT_EQ(expr1, expr2) ASSERT(expr1 == expr2)
+#define ASSERT_EQ(expr1, expr2)                                              \
+  if constexpr (cctest::has_streamable_traits<decltype(expr1)>() &&          \
+                cctest::has_streamable_traits<decltype(expr2)>()) {          \
+    cctest::assertions::assert_eq(expr1, expr2, __FUNCTION_NAME__, __FILE__, \
+                                  __LINE__, expr1 == expr2, false);          \
+  } else {                                                                   \
+    ASSERT(expr1 == expr2);                                                  \
+  }
+
 #define ASSERT_NEQ(expr1, expr2) ASSERT(expr1 != expr2)
 
-#define FATAL_ASSERT(expression) \
-  ASSERT__(expression, true)
+#define FATAL_ASSERT(expression) ASSERT__(expression, true)
 
 namespace cctest {
+
+template <typename T, typename = void>
+struct has_streamable_traits : public std::false_type {};
+
+template <typename T>
+struct has_streamable_traits<
+    T,
+    std::void_t<decltype(std::declval<std::ostream&>() << std::declval<T&>())>>
+    : public std::true_type {};
+
+enum assertion_type { assert, assert_equality_check };
 
 class assertion_failure : public std::exception {
  private:
   std::string expression, func_name, fname;
   bool is_fatal;
+  assertion_type type;
+  unsigned int line_count;
 
  public:
   assertion_failure(const std::string&& expression_,
                     const std::string&& func_name_, const std::string&& fname_,
-                    bool is_fatal_)
-      : expression(expression_), func_name(func_name_), fname(fname_), is_fatal(is_fatal_) {}
+                    unsigned int lc_, bool is_fatal_,
+                    assertion_type atype = assertion_type::assert)
+      : expression(expression_),
+        func_name(func_name_),
+        fname(fname_),
+        is_fatal(is_fatal_),
+        line_count(lc_),
+        type(atype) {}
 
   std::string to_string() const {
     std::stringstream error_stream;
-    if(is_fatal) error_stream << "\033[31mFATAL ERROR\033[39m\n";
+    if (is_fatal) error_stream << "\033[31mFATAL ERROR\033[39m\n";
     error_stream << "-----" << func_name << "----\n";
-    error_stream << func_name << " panicked at " << fname << "\n";
-    error_stream << "assertion " << expression << " failed\n";
+    error_stream << func_name << " panicked at " << fname << ":" << line_count
+                 << "\n";
+    if (type == assertion_type::assert) {
+      error_stream << "assertion " << expression << " failed\n";
+    } else {
+      error_stream << expression << "\n";
+    }
     return error_stream.str();
   }
 
@@ -106,7 +137,7 @@ class test_collection {
     out_stream << "Running " << tests.size()
                << (tests.size() == 1 ? " test" : " tests");
 
-    for (size_t i=0; i<tests.size(); ++i) {
+    for (size_t i = 0; i < tests.size(); ++i) {
       const test_case* unit_test = tests.at(i);
       auto result = run_individual_test(unit_test);
       out_stream << "\ntest " << unit_test->get_name() << " ... "
@@ -115,10 +146,13 @@ class test_collection {
         const auto failure = result.value();
         failures.push_back(std::move(failure.to_string()));
 
-        const auto remaining_tcount = (tests.size() - i - 1);
-        out_stream << "\nEncountered a fatal error, aborted the remaining " <<
-          remaining_tcount << (remaining_tcount == 1 ? " test\n": " tests\n");
-        if(failure.get_is_fatal()) break;
+        if (failure.get_is_fatal()) {
+          const auto remaining_tcount = (tests.size() - i - 1);
+          out_stream << "\nEncountered a fatal error, aborted the remaining "
+                     << remaining_tcount
+                     << (remaining_tcount == 1 ? " test\n" : " tests\n");
+          break;
+        }
       }
     }
     if (failures.size() > 0) {
@@ -148,14 +182,29 @@ class assertions {
  public:
   static void assert(const std::string&& expression_str,
                      const std::string&& func_name, const std::string&& fname,
-                     bool expression, bool is_fatal) {
+                     unsigned int lc, bool expression, bool is_fatal) {
     if (!expression) {
       throw assertion_failure(std::move(expression_str), std::move(func_name),
-                              std::move(fname), is_fatal);
+                              std::move(fname), lc, is_fatal);
+    }
+  }
+
+  template <typename T, typename K>
+  static void assert_eq(const T& expr1, const K& expr2,
+                        const std::string&& func_name,
+                        const std::string&& fname, unsigned int lc,
+                        bool expression, bool is_fatal) {
+    if (!expression) {
+      std::stringstream expression_str;
+      expression_str << "Assertion failed\nExpected: " << expr2
+                     << "\nActual: " << expr1;
+      throw assertion_failure(std::move(expression_str.str()),
+                              std::move(func_name), std::move(fname), lc,
+                              is_fatal, assertion_type::assert_equality_check);
     }
   }
 };
 
-}
+}  // namespace cctest
 
 #endif

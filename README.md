@@ -8,41 +8,55 @@ Here's an example
 ```cc
 #include "../include/cctest.hpp"
 #include ...
-
-// ...
+// ... 
 TEST_CASE(test_case_check_eq) {
   std::string initial = "Hello World";
   initial.append("world2");
-  ASSERT_EQ(initial, "Hello Worldworld2"); // PASSED
-  auto count = std::count_if(initial.begin(), initial.end(), [](char pred) {
-    return std::isdigit(pred);
-  });  
-  ASSERT_EQ(count, 1); // PASSED
+  ASSERT_EQ(initial, "Hello Worldworld2");
+  ASSERT_EQ(initial.at(0), 'H');
+  auto count = std::count_if(initial.begin(), initial.end(),
+                             [](char pred) { return std::isdigit(pred); });
+  ASSERT_EQ(count, 1);
+}
+
+TEST_CASE(yet_another_test) {
+  std::vector<int> v{1, 2, 3, 4, 5};
+  ASSERT(std::binary_search(v.begin(), v.end(), 3));
+  FATAL_ASSERT(1 == 1);
+  ASSERT_EQ(1, 4);
 }
 
 TEST_CASE(another_test) {
   std::vector<int> vec(10);
   std::iota(vec.begin(), vec.end(), 1);
-  ASSERT_EQ(std::accumulate(vec.begin(), vec.end(), 0), 55); // PASSED
-  ASSERT_NEQ(2 * 2, 4); // FAILED
+  ASSERT_EQ(std::accumulate(vec.begin(), vec.end(), 0), 55);
+
+  FATAL_ASSERT(1 == 3);
+  ASSERT_NEQ(2 * 2, 4);
 }
 
-int main() {
-  REGISTER_TEST(another_test);
-  REGISTER_TEST(test_case_check_eq);
-  RUN_TESTS();
-}
+int main() { RUN_TESTS(); }
 ```
 
 The following will be the output
 ```sh
-Running 2 tests
-test another_test ... FAILED
+Running 3 tests
 test test_case_check_eq ... PASSED
-failures:
------test_another_test----
-test_another_test panicked at example.cc
-assertion 2 * 2 != 4 failed
+test yet_another_test ... FAILED
+test another_test ... FAILED
+Encountered a fatal error, aborted the remaining 0 tests
 
-test result:FAILED. 1 passed; 1 failed;
+failures:
+-----run----
+run panicked at ./examples/example.cc:22
+Assertion failed
+Expected: 4
+Actual: 1
+
+FATAL ERROR
+-----run----
+run panicked at ./examples/example.cc:30
+assertion 1 == 3 failed
+
+test result:FAILED. 1 passed; 2 failed;
 ```
