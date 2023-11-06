@@ -18,6 +18,7 @@ TEST_CASE(test_case_check_eq) {
 TEST_CASE(yet_another_test) {
   std::vector<int> v{1, 2, 3, 4, 5};
   ASSERT(std::binary_search(v.begin(), v.end(), 3));
+  FATAL_ASSERT(1 == 2);
 }
 
 TEST_CASE(another_test) {
