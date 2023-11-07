@@ -1,4 +1,4 @@
-### cctest
+### cctest (refactor required)
 cctest is a very simple library made for testing in c++
 
 The library is a header-only library which contains a single header file which can be copied into your projects includes.
