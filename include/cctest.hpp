@@ -2,7 +2,9 @@
 #define CCTEST_HPP_INCLUDED
 
 #include <exception>
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -47,6 +49,10 @@
 
 #define FATAL_ASSERT(expression) ASSERT__(expression, true)
 
+#define EXPECT_THAT(expression, lambda)                                  \
+  cctest::assertions::expect_that(expression, lambda, __FUNCTION_NAME__, \
+                                  __FILE__, __LINE__, #expression)
+
 namespace cctest {
 
 template <typename T, typename = void>
@@ -60,7 +66,38 @@ struct has_streamable_traits<
 
 enum assertion_type { assert, assert_equality_check };
 
-class assertion_failure : public std::exception {
+class cctest_custom_exception : public std::exception {
+ public:
+  cctest_custom_exception() = default;
+  virtual std::string to_string() const = 0;
+  virtual bool get_is_fatal() const { return false; }
+};
+
+class unexpected_value_error : public cctest_custom_exception {
+ private:
+  std::string message, func_name, fname;
+  unsigned int line_count;
+
+ public:
+  unexpected_value_error(const std::string&& message_,
+                         const std::string&& func_name_,
+                         const std::string&& fname_, unsigned int lc_)
+      : message(message_),
+        func_name(func_name_),
+        fname(fname_),
+        line_count(lc_) {}
+
+  std::string to_string() const override {
+    std::stringstream error_stream;
+    error_stream << "-----" << func_name << "----\n";
+    error_stream << func_name << " panicked at " << fname << ":" << line_count
+                 << "\n";
+    error_stream << message << "\n";
+    return std::move(error_stream.str());
+  }
+};
+
+class assertion_failure : public cctest_custom_exception {
  private:
   std::string expression, func_name, fname;
   bool is_fatal;
@@ -79,7 +116,7 @@ class assertion_failure : public std::exception {
         line_count(lc_),
         type(atype) {}
 
-  std::string to_string() const {
+  std::string to_string() const override {
     std::stringstream error_stream;
     if (is_fatal) error_stream << "\033[31mFATAL ERROR\033[39m\n";
     error_stream << "-----" << func_name << "----\n";
@@ -90,10 +127,10 @@ class assertion_failure : public std::exception {
     } else {
       error_stream << expression << "\n";
     }
-    return error_stream.str();
+    return std::move(error_stream.str());
   }
 
-  bool get_is_fatal() const { return is_fatal; }
+  bool get_is_fatal() const override { return is_fatal; }
 };
 
 constexpr const char* failed_str = "\033[31mFAILED\033[39m";
@@ -120,18 +157,19 @@ class test_collection {
     return 0;
   }
 
-  static std::optional<assertion_failure> run_individual_test(
-      const test_case* test) {
+  static std::optional<std::unique_ptr<cctest_custom_exception>>
+  run_individual_test(const test_case* test) {
     try {
       test->run();
     } catch (const assertion_failure& exception) {
-      return exception;
+      return std::make_unique<assertion_failure>(exception);
+    } catch (const unexpected_value_error& exception) {
+      return std::make_unique<unexpected_value_error>(exception);
     };
     return {};
   }
 
   static void run_tests() {
-    std::ios_base::sync_with_stdio(false);
     std::stringstream out_stream;
     std::vector<std::string> failures;
     out_stream << "Running " << tests.size()
@@ -143,10 +181,10 @@ class test_collection {
       out_stream << "\ntest " << unit_test->get_name() << " ... "
                  << (result.has_value() ? failed_str : passed_str);
       if (result.has_value()) {
-        const auto failure = result.value();
-        failures.push_back(std::move(failure.to_string()));
+        const auto failure = std::move(result.value());
+        failures.push_back(std::move(failure->to_string()));
 
-        if (failure.get_is_fatal()) {
+        if (failure->get_is_fatal()) {
           const auto remaining_tcount = (tests.size() - i - 1);
           out_stream << "\nEncountered a fatal error, aborted the remaining "
                      << remaining_tcount
@@ -178,6 +216,38 @@ test_case::test_case(const std::string&& test) {
   test_collection::append(this);
 }
 
+namespace utils {
+
+template <typename T>
+using ret_function_t = std::function<bool(T)>;
+
+template <typename T>
+struct utils_func_ret_t {
+  const T& expected;
+  ret_function_t<T> function;
+  std::string fname;
+
+  utils_func_ret_t(const T& expected_, ret_function_t<T>&& func_,
+                   const std::string&& fname_)
+      : expected(expected_), function(std::move(func_)), fname(fname_) {}
+  bool operator()(T element) { return function(element); }
+};
+
+utils_func_ret_t<std::string> starts_with(const std::string& swith) {
+  return utils_func_ret_t<std::string>(
+      swith,
+      [&swith](const std::string& astring) { return astring.find(swith) == 0; },
+      "start with " + swith);
+}
+
+utils_func_ret_t<int> is_divisible_by(const int n) {
+  return utils_func_ret_t<int>(
+      n, [n](const int& p) { return p % n == 0; },
+      "be divisible by " + std::to_string(n));
+}
+
+}  // namespace utils
+
 class assertions {
  public:
   static void assert(const std::string&& expression_str,
@@ -201,6 +271,27 @@ class assertions {
       throw assertion_failure(std::move(expression_str.str()),
                               std::move(func_name), std::move(fname), lc,
                               is_fatal, assertion_type::assert_equality_check);
+    }
+  }
+
+  template <typename K>
+  static void expect_that(const K& value,
+                          cctest::utils::utils_func_ret_t<K>&& utils_return,
+                          const std::string&& func_name,
+                          const std::string&& fname, unsigned int lc,
+                          const std::string&& expression) {
+    bool evaluation = utils_return(value);
+    if (!evaluation) {
+      std::stringstream error_stream;
+      error_stream << "Expected ";
+      if constexpr (has_streamable_traits<K>()) {
+        error_stream << value;
+      } else {
+        error_stream << "(" << expression << ")";
+      }
+      error_stream << " to " << utils_return.fname;
+      throw unexpected_value_error(std::move(error_stream.str()),
+                                   std::move(func_name), std::move(fname), lc);
     }
   }
 };

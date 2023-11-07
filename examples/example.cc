@@ -6,6 +6,8 @@
 #include "../include/cctest.hpp"
 
 TEST_CASE(test_case_check_eq) {
+  EXPECT_THAT(9, cctest::utils::is_divisible_by(3));
+
   std::string initial = "Hello World";
   initial.append("world2");
   ASSERT_EQ(initial, "Hello Worldworld2");
