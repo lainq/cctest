@@ -10,6 +10,9 @@ Here's an example
 #include ...
 // ... 
 TEST_CASE(test_case_check_eq) {
+  EXPECT_THAT(9, cctest::utils::is_divisible_by(3));
+  EXPECT_THAT(std::string("Hello World"), cctest::utils::starts_with("Not Hello"));
+
   std::string initial = "Hello World";
   initial.append("world2");
   ASSERT_EQ(initial, "Hello Worldworld2");
@@ -48,6 +51,9 @@ Encountered a fatal error, aborted the remaining 0 tests
 
 failures:
 -----run----
+run panicked at ./examples/example.cc:10
+Expected "Hello World" to start with "Not Hello"
+
 run panicked at ./examples/example.cc:22
 Assertion failed
 Expected: 4

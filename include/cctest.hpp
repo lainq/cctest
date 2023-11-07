@@ -237,7 +237,7 @@ utils_func_ret_t<std::string> starts_with(const std::string& swith) {
   return utils_func_ret_t<std::string>(
       swith,
       [&swith](const std::string& astring) { return astring.find(swith) == 0; },
-      "start with " + swith);
+      "start with \"" + swith + "\"");
 }
 
 utils_func_ret_t<int> is_divisible_by(const int n) {
@@ -283,13 +283,13 @@ class assertions {
     bool evaluation = utils_return(value);
     if (!evaluation) {
       std::stringstream error_stream;
-      error_stream << "Expected ";
+      error_stream << "Expected \"";
       if constexpr (has_streamable_traits<K>()) {
         error_stream << value;
       } else {
         error_stream << "(" << expression << ")";
       }
-      error_stream << " to " << utils_return.fname;
+      error_stream << "\" to " << utils_return.fname;
       throw unexpected_value_error(std::move(error_stream.str()),
                                    std::move(func_name), std::move(fname), lc);
     }

@@ -7,6 +7,7 @@
 
 TEST_CASE(test_case_check_eq) {
   EXPECT_THAT(9, cctest::utils::is_divisible_by(3));
+  EXPECT_THAT(std::string("Hello World"), cctest::utils::starts_with("Not Hello"));
 
   std::string initial = "Hello World";
   initial.append("world2");
